@@ -1,2 +1,2 @@
-# oven
-Curing oven for carbon fiber components
+# Oven
+## Curing oven for carbon fiber components
