@@ -47,6 +47,8 @@ float currentTemp;
 
 bool relayStatus = false; // oven itself is on/off
 bool ovenStatus = false; // target for oven is on/off
+uint8_t errorCode = 0b00000000; // Bitmap for error conditions: 0 = ok, 1 = error
+// |Reserved|Reserved|Reserved|Reserved|Sensor3|Sensor2|Sensor1|Estop|
 
 #define avgBufLength 10
 float currentTempBuf[avgBufLength]; // running average
@@ -113,12 +115,19 @@ char textBuffer[8]; // buffer for text on canvas
 uint8_t canvasTextbuffer[128 * 16 / 8];
 NanoCanvas canvasText(128, 16, canvasTextbuffer);
 void displayUpdate() { // print data on screen
-  dtostrf(currentTemp, 6, 2, textBuffer);
-  canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
   dtostrf(targetTemp, 6, 2, textBuffer);
   canvasText.printFixed(42, 8, textBuffer, STYLE_NORMAL);
   sec2Clock(timeLeft / 1000, textBuffer); 
   canvasText.printFixed(85, 8, textBuffer, STYLE_NORMAL);
+
+  if (errorCode) {
+    sprintf(textBuffer, "Err%03d", errorCode);
+    canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
+  }
+  else {
+    dtostrf(currentTemp, 6, 2, textBuffer);
+    canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
+  }
   
   canvasText.blt(0, 0);
   //Serial.println(freeRam());
@@ -225,16 +234,12 @@ void loop() {
 
   // check if oven should be working
   if (!digitalRead(BUTTON1)) { // flip ovenStatus when button is pressed
-    ovenStatus = !ovenStatus;
-    uint16_t buzzerFreq = 131;
-    tone(BUZZER, buzzerFreq);
-    displayPlot(true);
-    while (!digitalRead(BUTTON1)) {
-      buzzerFreq ++;
-      delay(1);
-      tone(BUZZER, buzzerFreq);
-    }
+    tone(BUZZER, 524);
+    delay(10);
     noTone(BUZZER);
+    ovenStatus = !ovenStatus && !errorCode;
+    displayPlot(true);
+    while (!digitalRead(BUTTON1));
   }
   if (!ovenStatus) { // turn off, update starting temperature
     startTime = now - (60000.0 * currentTemp / 1.0); // adding an offset
@@ -259,7 +264,9 @@ void loop() {
     }
     
     //currentTempBuf[avgBufIdx] = (readTemperature(CS_TEMP1) + readTemperature(CS_TEMP2) + readTemperature(CS_TEMP3)) * 0.333333333333333333333333;
-    currentTempBuf[avgBufIdx] = mapFloat(readTemperature(CS_TEMP1), temp1_Zero, temp1_Hundred, 0, 100);
+    float newTemperature = readTemperature(CS_TEMP1);
+    errorCode = (errorCode & 0b11111101) + ((newTemperature == -1) << 1);
+    currentTempBuf[avgBufIdx] = mapFloat(newTemperature, temp1_Zero, temp1_Hundred, 0, 100);
     avgBufIdx++;
     if (avgBufIdx >= avgBufLength) avgBufIdx = 0;
     currentTemp = 0;
