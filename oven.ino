@@ -11,8 +11,8 @@
 #define SSR1_EN A3
 #define SDA A4
 #define SCL A5
-#define KNOB2 A0 // adjusting point of curve --> y
-#define KNOB1 A1 // adjusting phase curve --> x
+#define KNOB2 A7 // adjusting point of curve --> y
+#define KNOB1 A6 // adjusting phase curve --> x
 #define CS_TEMP1 10
 #define CS_TEMP2 9
 #define CS_TEMP3 8
