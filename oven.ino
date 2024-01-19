@@ -105,7 +105,7 @@ NanoCanvas canvasPlot(128, 48, canvasPlotbuffer); // draws progress & menu/setti
 NanoCanvas canvasText(128, 16, canvasTextbuffer); // draws data
 
 uint16_t eepromRead16(uint8_t addr) {
-  return EEPROM.read(addr) << 8 + EEPROM.read(addr + 1);
+  return (uint16_t(EEPROM.read(addr)) << 8) + EEPROM.read(addr + 1);
 }
 void eepromUpdate16(uint8_t addr, uint16_t value) {
   EEPROM.update(addr, value >> 8);
@@ -125,10 +125,10 @@ void initializeEEPROMData(){
   eepromWrite16(6, 14220);
   eepromWrite16(8, 21420);
   eepromWrite16(10, 22956);
-  eepromWrite16(12, -1);
-  eepromWrite16(14, -1);
-  eepromWrite16(16, -1);
-  eepromWrite16(18, -1);
+  eepromWrite16(12, 0xffff);
+  eepromWrite16(14, 0xffff);
+  eepromWrite16(16, 0xffff);
+  eepromWrite16(18, 0xffff);
   // initialize cookTemp (2 bytes per data)
   eepromWrite16(22, 0); 
   eepromWrite16(24, 107);
@@ -136,10 +136,10 @@ void initializeEEPROMData(){
   eepromWrite16(28, 177);
   eepromWrite16(30, 177);
   eepromWrite16(32, 49);
-  eepromWrite16(34, -1);
-  eepromWrite16(36, -1);
-  eepromWrite16(48, -1);
-  eepromWrite16(40, -1);
+  eepromWrite16(34, 0xffff);
+  eepromWrite16(36, 0xffff);
+  eepromWrite16(38, 0xffff);
+  eepromWrite16(40, 0xffff);
 
   eepromWrite16(20, 0);
   eepromWrite16(42, 0);
@@ -195,8 +195,9 @@ void recalibrateSettings(){
   uint8_t i = 0;
   while(i < 10){
     float val = eepromRead16(2*i);
-    if (val == -1) break;
+    if (val == 65535) break;
     CureATotalTime = val*1000;
+    i++;
   }
   timeLeft = CureATotalTime - ovenTime;
 }
@@ -310,10 +311,8 @@ void displayAdjust(uint8_t option){
   }
   else if(option == 3){
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[3])));
-    Serial.println(progBuffer);
     canvasPlot.printFixed(6, 14, progBuffer, STYLE_NORMAL);
     dtostrf(eepromRead16(20), 100, 18, textBuffer);
-    Serial.println(textBuffer);
     canvasPlot.printFixed(60, 14, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[6])));
@@ -403,10 +402,12 @@ void displayPlot(bool force) {
   canvasPlot.clear();
   canvasPlot.drawVLine(ovenTime * 127 / CureATotalTime, 0, 47); // line for total cookTime
   for (uint8_t i = 0; i < 128; i++) {
-    uint8_t thisY = uint8_t(CureTemp((float(i) / 127) * CureATotalTime) / 4); // gets y-value 
+    uint8_t thisY = uint8_t(CureTemp(float(i) / 127 * CureATotalTime * 1000) / 4); // gets y-value 
+    //Serial.print(thisY); Serial.print(" ");
     // uint8_t thisY = uint8_t( CureTemp(float(i) / 127 * cookTime[cookArrSize - 1] * 1000)  / 4);
     canvasPlot.putPixel(i, 47 - thisY);
   } // if (ovenStatus) { canvasPlot.printFixed(40, 32, "Oven Active!", STYLE_NORMAL); }
+  //Serial.println();
   canvasPlot.blt(0, 2);
 }
 
@@ -418,7 +419,7 @@ float CureTemp(uint32_t time) {
   float seconds = time / 1000.0;
   for (uint8_t i = 0; i < cookArrSize - 1; i++) {
     if (eepromRead16(2*i + 2) > seconds) {
-      return mapFloat(seconds, eepromRead16(2*i), eepromRead16(2*i + 2), eepromRead16(i+22), eepromRead16(i+24));
+      return mapFloat(seconds, eepromRead16(2*i), eepromRead16(2*i + 2), eepromRead16(i*2 + 22), eepromRead16(i*2 + 24));
     }
   } return 0;
 }
@@ -483,7 +484,6 @@ void loop() {
 
   // Update EEPROM initially
   if (eepromRead16(100) == 255){ // will execute when entering 1st loop()
-    Serial.println("to initialize eeprom");
     initializeEEPROMData();
     eepromUpdate16(100, 0);
   }
@@ -574,22 +574,16 @@ void loop() {
     }
     else if(knobY == 1){ // cookTime
       displayAdjust(2);
-      Serial.println("exited displayAdjust(2)");
       float divisor = 1023.0 / (10000.0 - getMinCookTime());
-      // Serial.print("Divisor = "); Serial.println(divisor);
-      uint8_t kX = getMinCookTime() + floor(analogRead(KNOB1) / divisor); // [0-1023] ~ [min-10k]
-      // Serial.print("kX = "); Serial.println(kX);
+      uint8_t kX = getMinCookTime() + analogRead(KNOB1) / divisor; // [0-1023] ~ [min-10k]
       eepromUpdate16(eepromRead16(20)*2, kX);
-      // Serial.print("Updated cookTime");
 
     }
     else if(knobY == 2){ // yPos
       displayAdjust(3);
-      // Serial.println("exited displayAdjust(3)");
-      uint8_t kX = floor(analogRead(KNOB1) / 5.2); // maps [0-1023] ~ [0-200]
-      // Serial.print("kX read: "); Serial.println(kx);
-      eepromUpdate16(eepromRead16(eepromRead16(20)+22), kX);
-      // Serial.print("kX read: "); Serial.println(kx);
+      uint8_t kX = float(analogRead(KNOB1)) / 5.2; // maps [0-1023] ~ [0-200]
+      Serial.println("knobX"); Serial.println(kX);
+      eepromUpdate16(eepromRead16(eepromRead16(20)*2 +22), kX);
     }
     else if (knobY == 3){ // back button
       displayAdjust(4);
