@@ -12,11 +12,11 @@
 #define SSR1_EN A3
 #define SDA A4
 #define SCL A5
+#define KNOB2 A7 // adjusting point of curve --> y
+#define KNOB1 A6 // adjusting phase curve --> x
 #define CS_TEMP1 10
 #define CS_TEMP2 9
 #define CS_TEMP3 8
-#define KNOB_1 A1 // adjusting x (0-1023)
-#define KNOB_2 A0 // adjusting y (0-1023)
 #define BUTTON1 2 // ovenStatus --> on/off
 #define BUTTON2 7 // confirms selection
 #define ESTOP 5
@@ -60,7 +60,6 @@ bool writtenToEEPROM = false; // does EEPROM have values
 bool relayStatus = false; // oven itself is on/off
 bool ovenStatus = false; // modes: on/off vs adjust
 bool adjustStatus = false; // user changed settings
-
 // store text in "PROGMEM" Flash: // strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[i])));
 const char menu[] PROGMEM = "MENU";
 const char back[] PROGMEM = "ADJUST";
@@ -71,6 +70,8 @@ const char filler[] PROGMEM = "FILLER";
 const char time[] PROGMEM = "TIME";
 char progBuffer[10];
 const char *const menuItems[] PROGMEM = {menu, back, adjust, xPos, yPos, filler, time};
+uint8_t errorCode = 0b00000000; // Bitmap for error conditions: 0 = ok, 1 = error
+// |Reserved|Reserved|Reserved|Reserved|Sensor3|Sensor2|Sensor1|Estop|
 
 float currentTempBuf[avgBufLength]; // running average
 uint8_t avgBufIdx = 0;
@@ -352,10 +353,21 @@ void displayUpdate() {
   canvasText.printFixed(0, 11, "       Temp    State", STYLE_NORMAL);
   dtostrf(currentTemp, 6, 2, textBuffer);
   canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
+}
+void displayUpdate() { // print data on screen
   dtostrf(targetTemp, 6, 2, textBuffer);
   canvasText.printFixed(42, 8, textBuffer, STYLE_NORMAL);
   sec2Clock(timeLeft / 1000, textBuffer); 
   canvasText.printFixed(85, 8, textBuffer, STYLE_NORMAL);
+
+  if (errorCode) {
+    sprintf(textBuffer, "Err%03d", errorCode);
+    canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
+  }
+  else {
+    dtostrf(currentTemp, 6, 2, textBuffer);
+    canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
+  }
   canvasText.blt(0, 0);
   //Serial.println(freeRam());
 }
@@ -386,9 +398,11 @@ void displayPlot(bool force) {
   } // if (ovenStatus) { canvasPlot.printFixed(40, 32, "Oven Active!", STYLE_NORMAL); }
   canvasPlot.blt(0, 2);
 }
+
 float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
+
 float CureTemp(uint32_t time) {
   float seconds = time / 1000.0;
   for (uint8_t i = 0; i < cookArrSize - 1; i++) {
@@ -460,18 +474,14 @@ void loop() {
     initializeEEPROMData();
     writtenToEEPROM = true;
   }
-  // check if oven is working
-  if (!digitalRead(BUTTON1)) { // flip ovenStatus
-    ovenStatus = !ovenStatus;
-    uint16_t buzzerFreq = 131;
-    tone(BUZZER, buzzerFreq);
-    displayPlot(false);
-    while (!digitalRead(BUTTON1)) {
-      buzzerFreq++;
-      delay(1);
-      tone(BUZZER, buzzerFreq);
-    }
+  // check if oven should be working
+  if (!digitalRead(BUTTON1)) { // flip ovenStatus when button is pressed
+    tone(BUZZER, 524);
+    delay(10);
     noTone(BUZZER);
+    ovenStatus = !ovenStatus && !errorCode;
+    displayPlot(true);
+    while (!digitalRead(BUTTON1));
   }
   if (!ovenStatus) { // turn off, update starting temperature & time
     startTime = now - (60000.0 * currentTemp / 1.0); // offset
@@ -496,6 +506,11 @@ void loop() {
 
     // temperature updates
     currentTempBuf[avgBufIdx] = readTemperature(CS_TEMP1);
+    //currentTempBuf[avgBufIdx] = (readTemperature(CS_TEMP1) + readTemperature(CS_TEMP2) + readTemperature(CS_TEMP3)) * 0.333333333333333333333333;
+    float newTemperature = readTemperature(CS_TEMP1);
+    errorCode = (errorCode & 0b11111101) + ((newTemperature == -1) << 1);
+    currentTempBuf[avgBufIdx] = mapFloat(newTemperature, temp1_Zero, temp1_Hundred, 0, 100);
+
     avgBufIdx++;
     if (avgBufIdx >= avgBufLength) avgBufIdx = 0;
     currentTemp = 0;
