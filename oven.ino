@@ -49,14 +49,13 @@ ________________________________________________________________________________
            22   24     26       28      30     32     34   36   38   40              42 ｜
 _________________________________________________________________________________________
 cookTemp | 0 | 107  | 107   | 177   | 177   |  49   | -1 | -1 | -1 | -1 | reserve |  ?  |
-_________________________________________________________________________________________
+_________________________________________________________________________________________ location 100: 255 if not written to, else, 1
 
 */
 // Status variables
 float targetTemp; // target temperature
 float currentTemp; // current temperature
 
-bool writtenToEEPROM = false; // does EEPROM have values
 bool relayStatus = false; // oven itself is on/off
 bool ovenStatus = false; // modes: on/off vs adjust
 bool adjustStatus = false; // user changed settings
@@ -105,32 +104,45 @@ char textBuffer[8]; // buffer for text on canvas
 NanoCanvas canvasPlot(128, 48, canvasPlotbuffer); // draws progress & menu/settings
 NanoCanvas canvasText(128, 16, canvasTextbuffer); // draws data
 
+uint16_t eepromRead16(uint8_t addr) {
+  return EEPROM.read(addr) << 8 + EEPROM.read(addr + 1);
+}
+void eepromUpdate16(uint8_t addr, uint16_t value) {
+  EEPROM.update(addr, value >> 8);
+  EEPROM.update(addr + 1, value);
+}
+
+void eepromWrite16(uint8_t addr, uint16_t value) {
+  EEPROM.write(addr, value >> 8);
+  EEPROM.write(addr + 1, value);
+}
+
 void initializeEEPROMData(){
   // initialize cookTime (2 bytes per data)
-  EEPROM.write(0, 0); 
-  EEPROM.write(2, 6420);
-  EEPROM.write(4, 10020);
-  EEPROM.write(6, 14220);
-  EEPROM.write(8, 21420);
-  EEPROM.write(10, 22956);
-  EEPROM.write(12, -1);
-  EEPROM.write(14, -1);
-  EEPROM.write(16, -1);
-  EEPROM.write(18, -1);
+  eepromWrite16(0, 0); 
+  eepromWrite16(2, 6420);
+  eepromWrite16(4, 10020);
+  eepromWrite16(6, 14220);
+  eepromWrite16(8, 21420);
+  eepromWrite16(10, 22956);
+  eepromWrite16(12, -1);
+  eepromWrite16(14, -1);
+  eepromWrite16(16, -1);
+  eepromWrite16(18, -1);
   // initialize cookTemp (2 bytes per data)
-  EEPROM.write(22, 0); 
-  EEPROM.write(24, 107);
-  EEPROM.write(26, 107);
-  EEPROM.write(28, 177);
-  EEPROM.write(30, 177);
-  EEPROM.write(32, 49);
-  EEPROM.write(34, -1);
-  EEPROM.write(36, -1);
-  EEPROM.write(48, -1);
-  EEPROM.write(40, -1);
+  eepromWrite16(22, 0); 
+  eepromWrite16(24, 107);
+  eepromWrite16(26, 107);
+  eepromWrite16(28, 177);
+  eepromWrite16(30, 177);
+  eepromWrite16(32, 49);
+  eepromWrite16(34, -1);
+  eepromWrite16(36, -1);
+  eepromWrite16(48, -1);
+  eepromWrite16(40, -1);
 
-  EEPROM.write(20, 0);
-  EEPROM.write(42, 0);
+  eepromWrite16(20, 0);
+  eepromWrite16(42, 0);
 }
 void sec2Clock(uint32_t seconds, char str[]) {
   uint8_t hours = seconds / 3600;
@@ -166,9 +178,9 @@ void updatePID() {
   Serial.print(" Out: "); Serial.println(ovenPower);
 }
 uint8_t getMinCookTime(){
-  uint8_t point = EEPROM.read(20);
+  uint8_t point = eepromRead16(20);
   if(point == 0) return 0;
-  else{ return EEPROM.read(EEPROM.read(20) - 1) + 1;}
+  else{ return eepromRead16(eepromRead16(20) - 1) + 1;}
   // when user adjusts x-value, find the minimum value they can set
 }
 void recalibrateSettings(){
@@ -182,7 +194,7 @@ void recalibrateSettings(){
   // reset timeLeft & CureATotalTime
   uint8_t i = 0;
   while(i < 10){
-    float val = EEPROM.read(2*i);
+    float val = eepromRead16(2*i);
     if (val == -1) break;
     CureATotalTime = val*1000;
   }
@@ -190,7 +202,7 @@ void recalibrateSettings(){
 }
 void displayMenu(uint8_t option){ 
   /* // 1 = BACK, 2 = ADJUST, 3 = FILLER
-  ___________________________
+   ___________________________
   |             MENU          |
   |---------------------------|
   |            BACK <         |  
@@ -198,7 +210,7 @@ void displayMenu(uint8_t option){
   |            ADJUST         |
   |---------------------------|
   |            FILLER         |
-  ---------------------------
+   ---------------------------
   */
   canvasPlot.clear();
   canvasPlot.drawRect(2, 2, 126, 46);
@@ -207,11 +219,11 @@ void displayMenu(uint8_t option){
   canvasPlot.drawRect(3, 25, 125, 35);
   canvasPlot.drawRect(3, 36, 125, 45);
   strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[0])));
-  canvasPlot.printFixed(56, 8, progBuffer, STYLE_BOLD);
+  canvasPlot.printFixed(56, 8, progBuffer, STYLE_ITALIC);
 
   if(option == 1){
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
-    canvasPlot.printFixed(56, 18, progBuffer, STYLE_ITALIC);
+    canvasPlot.printFixed(56, 18, progBuffer, STYLE_BOLD);
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[2])));
     canvasPlot.printFixed(56, 29, progBuffer, STYLE_NORMAL);
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[5])));
@@ -221,7 +233,7 @@ void displayMenu(uint8_t option){
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
     canvasPlot.printFixed(56, 18, progBuffer, STYLE_NORMAL);
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[2])));
-    canvasPlot.printFixed(56, 29, progBuffer, STYLE_ITALIC);
+    canvasPlot.printFixed(56, 29, progBuffer, STYLE_BOLD);
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[5])));
     canvasPlot.printFixed(56, 40, progBuffer, STYLE_NORMAL);
   }
@@ -231,7 +243,7 @@ void displayMenu(uint8_t option){
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[2])));
     canvasPlot.printFixed(56, 29, progBuffer, STYLE_NORMAL);
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[5])));
-    canvasPlot.printFixed(56, 40, progBuffer, STYLE_ITALIC);
+    canvasPlot.printFixed(56, 40, progBuffer, STYLE_BOLD);
   }
   else{ /* ERROR */  }
   canvasPlot.blt(0, 2);
@@ -257,21 +269,21 @@ void displayAdjust(uint8_t option){
   canvasPlot.drawRect(3, 29, 125, 38); // y value
   canvasPlot.drawRect(3, 39, 125, 44); // back button
   strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
-  canvasPlot.printFixed(54, 6, progBuffer, STYLE_BOLD);
+  canvasPlot.printFixed(54, 6, progBuffer, STYLE_ITALIC);
   if(option == 1){ 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[3])));
-    canvasPlot.printFixed(6, 14, progBuffer, STYLE_ITALIC);
-    dtostrf(EEPROM.read(20), 100, 18, textBuffer);
+    canvasPlot.printFixed(6, 14, progBuffer, STYLE_BOLD);
+    dtostrf(eepromRead16(20), 100, 18, textBuffer);
     canvasText.printFixed(60, 14, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[6])));
     canvasPlot.printFixed(6, 23, progBuffer, STYLE_NORMAL);
-    dtostrf(EEPROM.read(2*EEPROM.read(20)), 100, 18, textBuffer);
+    dtostrf(eepromRead16(2*eepromRead16(20)), 100, 18, textBuffer);
     canvasText.printFixed(60, 23, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[4])));
     canvasPlot.printFixed(6, 32, progBuffer, STYLE_NORMAL);
-    dtostrf(EEPROM.read(2*EEPROM.read(20) + 22), 100, 29, textBuffer); 
+    dtostrf(eepromRead16(2*eepromRead16(20) + 22), 100, 29, textBuffer); 
     canvasText.printFixed(60, 32, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
@@ -280,17 +292,17 @@ void displayAdjust(uint8_t option){
   if(option == 2){// make sure this list is sorted in increasing order
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[3])));
     canvasPlot.printFixed(6, 14, progBuffer, STYLE_NORMAL);
-    dtostrf(EEPROM.read(20), 100, 18, textBuffer);
+    dtostrf(eepromRead16(20), 100, 18, textBuffer);
     canvasText.printFixed(60, 14, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[6])));
-    canvasPlot.printFixed(6, 23, progBuffer, STYLE_ITALIC);
-    dtostrf(EEPROM.read(2*EEPROM.read(20)), 100, 18, textBuffer);
+    canvasPlot.printFixed(6, 23, progBuffer, STYLE_BOLD);
+    dtostrf(eepromRead16(2*eepromRead16(20)), 100, 18, textBuffer);
     canvasText.printFixed(60, 23, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[4])));
     canvasPlot.printFixed(6, 32, progBuffer, STYLE_NORMAL);
-    dtostrf(EEPROM.read(2*EEPROM.read(20) + 22), 100, 29, textBuffer); 
+    dtostrf(eepromRead16(2*eepromRead16(20) + 22), 100, 29, textBuffer); 
     canvasText.printFixed(60, 32, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
@@ -299,17 +311,17 @@ void displayAdjust(uint8_t option){
   if(option == 3){ 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[3])));
     canvasPlot.printFixed(6, 14, progBuffer, STYLE_NORMAL);
-    dtostrf(EEPROM.read(20), 100, 18, textBuffer);
+    dtostrf(eepromRead16(20), 100, 18, textBuffer);
     canvasText.printFixed(60, 14, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[6])));
     canvasPlot.printFixed(6, 23, progBuffer, STYLE_NORMAL);
-    dtostrf(EEPROM.read(2*EEPROM.read(20)), 100, 18, textBuffer);
+    dtostrf(eepromRead16(2*eepromRead16(20)), 100, 18, textBuffer);
     canvasText.printFixed(60, 23, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[4])));
-    canvasPlot.printFixed(6, 32, progBuffer, STYLE_ITALIC);
-    dtostrf(EEPROM.read(2*EEPROM.read(20) + 22), 100, 29, textBuffer); 
+    canvasPlot.printFixed(6, 32, progBuffer, STYLE_BOLD);
+    dtostrf(eepromRead16(2*eepromRead16(20) + 22), 100, 29, textBuffer); 
     canvasText.printFixed(60, 32, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
@@ -318,21 +330,21 @@ void displayAdjust(uint8_t option){
   if(option == 4){
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[3])));
     canvasPlot.printFixed(6, 14, progBuffer, STYLE_NORMAL);
-    dtostrf(EEPROM.read(20), 100, 18, textBuffer);
+    dtostrf(eepromRead16(20), 100, 18, textBuffer);
     canvasText.printFixed(60, 14, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[6])));
     canvasPlot.printFixed(6, 23, progBuffer, STYLE_NORMAL);
-    dtostrf(EEPROM.read(2*EEPROM.read(20)), 100, 18, textBuffer);
+    dtostrf(eepromRead16(2*eepromRead16(20)), 100, 18, textBuffer);
     canvasText.printFixed(60, 23, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[4])));
-    canvasPlot.printFixed(6, 32, progBuffer, STYLE_ITALIC);
-    dtostrf(EEPROM.read(2*EEPROM.read(20) + 22), 100, 29, textBuffer); 
+    canvasPlot.printFixed(6, 32, progBuffer, STYLE_NORMAL);
+    dtostrf(eepromRead16(2*eepromRead16(20) + 22), 100, 29, textBuffer); 
     canvasText.printFixed(60, 32, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
-    canvasPlot.printFixed(6, 42, progBuffer, STYLE_ITALIC);
+    canvasPlot.printFixed(6, 42, progBuffer, STYLE_BOLD);
   }
   canvasPlot.blt(0, 2);
 }
@@ -399,8 +411,8 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
 float CureTemp(uint32_t time) {
   float seconds = time / 1000.0;
   for (uint8_t i = 0; i < cookArrSize - 1; i++) {
-    if (EEPROM.read(2*i + 2) > seconds) {
-      return mapFloat(seconds, EEPROM.read(2*i), EEPROM.read(2*(i + 1)), EEPROM.read(i+22), EEPROM.read(i+24));
+    if (eepromRead16(2*i + 2) > seconds) {
+      return mapFloat(seconds, eepromRead16(2*i), eepromRead16(2*(i + 1)), eepromRead16(i+22), eepromRead16(i+24));
     }
   } return 0;
 }
@@ -463,9 +475,9 @@ void loop() {
   now = millis() * timeDilation;
 
   // Update EEPROM initially
-  if (writtenToEEPROM == false){ // will execute when entering 1st loop()
+  if (eepromRead16(100) == 255){ // will execute when entering 1st loop()
     initializeEEPROMData();
-    writtenToEEPROM = true;
+    eepromUpdate16(100, 0);
   }
   // check if oven should be working
   if (!digitalRead(BUTTON1)) { // flip ovenStatus when button is pressed
@@ -545,23 +557,23 @@ void loop() {
     if(knobY == 0){ // adjust_x
       displayAdjust(1);
       uint8_t kX = floor(analogRead(KNOB1) / 103); // [0-1023] ~ [0-9]
-      EEPROM.update(20, kX); // x position
-      if(EEPROM.read(kX*2) == -1){ 
-        EEPROM.update(kX*2, getMinCookTime());
-        EEPROM.update(kX*2+22, 0);
+      eepromUpdate16(20, kX); // x position
+      if(eepromRead16(kX*2) == -1){ 
+        eepromUpdate16(kX*2, getMinCookTime());
+        eepromUpdate16(kX*2+22, 0);
       }
     }
     else if(knobY == 1){ // cookTime
       displayAdjust(2);
       float divisor = 1023.0 / (10000.0 - getMinCookTime());
       uint8_t kX = getMinCookTime() + floor(analogRead(KNOB1) / divisor); // [0-1023] ~ [min-10k]
-      EEPROM.update(EEPROM.read(EEPROM.read(20)*2), kX);
+      eepromUpdate16(eepromRead16(eepromRead16(20)*2), kX);
 
     }
     else if(knobY == 2){ // cookTemp
       displayAdjust(3);
       uint8_t kX = floor(analogRead(KNOB1) / 5.2); // maps [0-1023] ~ [0-200]
-      EEPROM.update(EEPROM.read(EEPROM.read(20)+22), kX);
+      eepromUpdate16(eepromRead16(eepromRead16(20)+22), kX);
     }
     else{ // back button
       displayAdjust(4);
