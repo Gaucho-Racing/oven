@@ -353,13 +353,6 @@ void displayUpdate() {
   canvasText.printFixed(0, 11, "       Temp    State", STYLE_NORMAL);
   dtostrf(currentTemp, 6, 2, textBuffer);
   canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
-}
-void displayUpdate() { // print data on screen
-  dtostrf(targetTemp, 6, 2, textBuffer);
-  canvasText.printFixed(42, 8, textBuffer, STYLE_NORMAL);
-  sec2Clock(timeLeft / 1000, textBuffer); 
-  canvasText.printFixed(85, 8, textBuffer, STYLE_NORMAL);
-
   if (errorCode) {
     sprintf(textBuffer, "Err%03d", errorCode);
     canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
@@ -369,8 +362,8 @@ void displayUpdate() { // print data on screen
     canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
   }
   canvasText.blt(0, 0);
-  //Serial.println(freeRam());
 }
+
 void displayPlot(bool force) {
   /* displayPlot()
   ___________________
@@ -539,7 +532,7 @@ void loop() {
       }
   }
   else if(currCanvas == 1){ // menu
-      knobY = floor(analogRead(KNOB_2) / 342); // [0-2]
+      knobY = floor(analogRead(KNOB2) / 342); // [0-2]
       displayMenu(knobY); // defaults to 0 = back button
       if(!digitalRead(BUTTON2) && knobY == 0){ /* back button*/ currCanvas = 0;  }
       else if(!digitalRead(BUTTON2) && knobY == 1){ /* adjust button*/ currCanvas = 2; }
@@ -547,11 +540,11 @@ void loop() {
   }
   else if (currCanvas == 2){ // adjust
     adjustStatus = true;
-    knobY = floor(analogRead(KNOB_2) / 256); // [0-1023] ~ [0, 1, 2, 3]
+    knobY = floor(analogRead(KNOB2) / 256); // [0-1023] ~ [0, 1, 2, 3]
 
     if(knobY == 0){ // adjust_x
       displayAdjust(1);
-      uint8_t kX = floor(analogRead(KNOB_1) / 103); // [0-1023] ~ [0-9]
+      uint8_t kX = floor(analogRead(KNOB1) / 103); // [0-1023] ~ [0-9]
       EEPROM.update(20, kX); // x position
       if(EEPROM.read(kX*2) == -1){ 
         EEPROM.update(kX*2, getMinCookTime());
@@ -561,13 +554,13 @@ void loop() {
     else if(knobY == 1){ // cookTime
       displayAdjust(2);
       float divisor = 1023.0 / (10000.0 - getMinCookTime());
-      uint8_t kX = getMinCookTime() + floor(analogRead(KNOB_1) / divisor); // [0-1023] ~ [min-10k]
+      uint8_t kX = getMinCookTime() + floor(analogRead(KNOB1) / divisor); // [0-1023] ~ [min-10k]
       EEPROM.update(EEPROM.read(EEPROM.read(20)*2), kX);
 
     }
     else if(knobY == 2){ // cookTemp
       displayAdjust(3);
-      uint8_t kX = floor(analogRead(KNOB_1) / 5.2); // maps [0-1023] ~ [0-200]
+      uint8_t kX = floor(analogRead(KNOB1) / 5.2); // maps [0-1023] ~ [0-200]
       EEPROM.update(EEPROM.read(EEPROM.read(20)+22), kX);
     }
     else{ // back button
