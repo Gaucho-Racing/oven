@@ -88,6 +88,18 @@ int freeRam(void) {
   return (free_memory);
 }
 
+uint16_t eepromRead16(uint8_t addr) {
+  return EEPROM.read(addr) << 8 + EEPROM.read(addr + 1);
+}
+void eepromUpdate16(uint8_t addr, uint16_t value) {
+  EEPROM.update(addr, value >> 8);
+  EEPROM.update(addr + 1, value);
+}
+
+void eepromWrite16(uint8_t addr, uint16_t value) {
+  EEPROM.write(addr, value >> 8);
+  EEPROM.write(addr + 1, value);
+}
 
 void updatePID() {
   // TODO: switch between two PID profiles according to whether temperature is increasing or decreasing
