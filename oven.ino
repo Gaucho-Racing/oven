@@ -1,4 +1,4 @@
-#include <avdweb_AnalogReadFast.h> // use analogReadFast(adcPin);
+// #include <avdweb_AnalogReadFast.h> // use analogReadFast(adcPin);
 #include <avr/pgmspace.h>
 #include <Wire.h>
 #include <SPI.h>
@@ -12,8 +12,8 @@
 #define SSR1_EN A3
 #define SDA A4
 #define SCL A5
-#define KNOB2 A7 // adjusting point of curve --> y
-#define KNOB1 A6 // adjusting phase curve --> x
+#define KNOB1 A6 // adjusting phase x
+#define KNOB2 A7 // adjusting temp y
 #define CS_TEMP1 10
 #define CS_TEMP2 9
 #define CS_TEMP3 8
@@ -40,26 +40,28 @@
 #define kp_d 10
 #define kp_dd -3
 
-/* EEPROM STORAGE VISUALIZATION                  
- _______________________________________________________________________________________
-           0     2      4       6       8      10     12   14   16   18              20 ｜
-_________________________________________________________________________________________
-cookTime | 0 | 6420 | 10020 | 14220 | 21420 | 22956 | -1 | -1 | -1 | -1 | x-point |  9  |
-_________________________________________________________________________________________
-           22   24     26       28      30     32     34   36   38   40              42 ｜
-_________________________________________________________________________________________
-cookTemp | 0 | 107  | 107   | 177   | 177   |  49   | -1 | -1 | -1 | -1 | reserve |  ?  |
-_________________________________________________________________________________________ location 100: 255 if not written to, else, 1
+/* EEPROM STORAGE VISUALIZATION  
 
+Location 100: 255 if not written to, else, 1               
+ ________________________________________________________________________
+|           0     2      4       6       8      10     12   14   16   18 |
+|________________________________________________________________________|
+|cookTime | 0 | 6420 | 10020 | 14220 | 21420 | 22956 | -1 | -1 | -1 | -1 |
+|________________________________________________________________________|
+|           22   24     26       28      30     32     34   36   38   40 |
+|________________________________________________________________________|
+|cookTemp | 0 | 107  | 107   | 177   | 177   |  49   | -1 | -1 | -1 | -1 |
+|________________________________________________________________________|
 */
+
 // Status variables
 float targetTemp; // target temperature
 float currentTemp; // current temperature
-
 bool relayStatus = false; // oven itself is on/off
 bool ovenStatus = false; // modes: on/off vs adjust
 bool adjustStatus = false; // user changed settings
-// store text in "PROGMEM" Flash: // strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[i])));
+
+char progBuffer[30];
 const char menu[] PROGMEM = "MENU";
 const char back[] PROGMEM = "BACK";
 const char adjust[] PROGMEM = "ADJUST";
@@ -67,43 +69,49 @@ const char xPos[] PROGMEM = "X";
 const char yPos[] PROGMEM = "Y";
 const char filler[] PROGMEM = "FILLER";
 const char time[] PROGMEM = "TIME";
-char progBuffer[30];
 const char *const menuItems[] PROGMEM = {menu, back, adjust, xPos, yPos, filler, time};
+uint16_t x_position = 0; // default value of the x-position in adjust mode
+
 uint8_t errorCode = 0b00000000; // Bitmap for error conditions: 0 = ok, 1 = error
 // |Reserved|Reserved|Reserved|Reserved|Sensor3|Sensor2|Sensor1|Estop|
 
-float currentTempBuf[avgBufLength]; // running average
 uint8_t avgBufIdx = 0;
-float fps;
-bool screenMode = false;
-float previous_error = 0, error_integral = 0; //req vars for PID algorithm
+
+float currentTempBuf[avgBufLength]; // running average
+float fps, previous_error = 0, error_integral = 0, p, d, dd, previous_d; // PID algorithm
 float ovenPower = 0;
-float p, d, dd, previous_d;
 
 // SPI
 uint16_t SPIReceive = 0;
 
 // Timing stuff
-uint32_t now;
+uint8_t switchCounter = 0;
+
 uint16_t frameTime;
-uint32_t lastSwitchTime;
 uint16_t switchIntvl = 200;
+
+uint32_t now;
+uint32_t lastSwitchTime;
 uint32_t startTime = 0; // oven starts
 uint32_t ovenTime = 0; // now - startTime
 uint32_t timeLeft = 0; // time Left until Cure finishes
-uint32_t CureATotalTime; // default cure time
-uint8_t switchCounter = 0;
+uint32_t CureATotalTime = 0; // default cure time
 
 // Canvas Stuff
-uint8_t knobY = 0;  // current knob position for y on NanoCanvas
+bool screenMode = false;
+char textBuffer[8]; // buffer for text on canvas
 uint8_t currCanvas = 0; // 0 = Graph, 1 = Menu, 2 = Adjust, 3 = Filler
 uint8_t pastLinePosition = 0;
 uint8_t canvasPlotbuffer[128 * 48 / 8];
 uint8_t canvasTextbuffer[128 * 16 / 8];
-char textBuffer[8]; // buffer for text on canvas
+uint16_t knobY = 0;
 NanoCanvas canvasPlot(128, 48, canvasPlotbuffer); // draws progress & menu/settings
-NanoCanvas canvasText(128, 16, canvasTextbuffer); // draws data
+NanoCanvas canvasText(128, 16, canvasTextbuffer); // draws data (Time, Target, Temp)
 
+/////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+
+// EEPROM methods
 uint16_t eepromRead16(uint8_t addr) {
   return (uint16_t(EEPROM.read(addr)) << 8) + EEPROM.read(addr + 1);
 }
@@ -111,13 +119,12 @@ void eepromUpdate16(uint8_t addr, uint16_t value) {
   EEPROM.update(addr, value >> 8);
   EEPROM.update(addr + 1, value);
 }
-
 void eepromWrite16(uint8_t addr, uint16_t value) {
   EEPROM.write(addr, value >> 8);
   EEPROM.write(addr + 1, value);
 }
-
 void initializeEEPROMData(){
+  // enters data into EEPROM when there is nothing in it --> very initial memory
   // initialize cookTime (2 bytes per data)
   eepromWrite16(0, 0); 
   eepromWrite16(2, 6420);
@@ -141,9 +148,12 @@ void initializeEEPROMData(){
   eepromWrite16(38, 0xffff);
   eepromWrite16(40, 0xffff);
 
+  // initializes reserved spots to 0
   eepromWrite16(20, 0);
   eepromWrite16(42, 0);
 }
+
+// Calculation methods
 void sec2Clock(uint32_t seconds, char str[]) {
   uint8_t hours = seconds / 3600;
   seconds -= 3600 * hours;
@@ -177,41 +187,41 @@ void updatePID() {
   // Serial.print(" DD: ");   Serial.print(dd * kp_dd, 3);
   // Serial.print(" Out: "); Serial.println(ovenPower);
 }
-uint8_t getMinCookTime(){
-  uint8_t point = eepromRead16(20);
-  if(point == 0) return 0;
-  else{ return eepromRead16(eepromRead16(20) - 1) + 1;}
-  // when user adjusts x-value, find the minimum value they can set
+uint16_t getMinCookTime(){ // when user adjusts x-value, find the minimum value they can set
+  return x_position == 0 ? 0 : eepromRead16(x_position - 1) + 1; 
 }
-void recalibrateSettings(){
-  // reset variables
+uint16_t getMaxXPosition(){ // returns the maximum x-position that the user can chooose (since we can't have them skip an x-position)
+  uint16_t index = 0;
+  while(eepromRead16(2*index) != 0xffff){ index++; }
+  return index+1;
+}
+void recalibrateSettings(){ // reset variables
   previous_error = 0, error_integral = 0;
   p = 0, d = 0, dd = 0;
   previous_d = 0;
   ovenTime = 0;
   ovenPower = 0;
-  
-  // reset timeLeft & CureATotalTime
-  uint8_t i = 0;
-  while(i < 10){
-    float val = eepromRead16(2*i);
+  uint8_t i = 0; // reset timeLeft & CureATotalTime
+  while(i < cookArrSize){
+    uint16_t val = eepromRead16(2*i);
     if (val == 65535) break;
-    CureATotalTime = val*1000;
+    CureATotalTime = val * 1000;
     i++;
   }
   timeLeft = CureATotalTime - ovenTime;
 }
-void displayMenu(uint8_t option){ 
-  /* // 1 = BACK, 2 = ADJUST, 3 = FILLER
-   ___________________________
-  |             MENU          |
-  |---------------------------|
-  |            BACK <         |  
-  |---------------------------|
-  |            ADJUST         |
-  |---------------------------|
-  |            FILLER         |
-   ---------------------------
+// Display methods
+void displayMenu(uint8_t option){ // 1 = BACK, 2 = ADJUST, 3 = FILLER
+  /* 
+   __________________________
+  |            MENU          |
+  |--------------------------|
+  |            BACK          |  
+  |--------------------------|
+  |           ADJUST         |
+  |--------------------------|
+  |           FILLER         |
+   --------------------------
   */
   canvasPlot.clear();
   canvasPlot.drawRect(2, 2, 126, 46);
@@ -249,19 +259,19 @@ void displayMenu(uint8_t option){
   else{ /* ERROR */  }
   canvasPlot.blt(0, 2);
 }
-void displayAdjust(uint8_t option){
-  /* // 1 = X, 2 = time, 3 = Y, 4 = BACK
-  ___________________________________
-  |               ADJUST              |
-  |-----------------------------------|
-  |   X              |  9  |          |
-  |-----------------------------------|
-  |   TIME           | 243 |          | --> find minimum time you can set
-  |-----------------------------------|
-  |   Y              | 243 |          |
-  |-----------------------------------|
-  |                BACK               |
-  ------------------------------------
+void displayAdjust(uint8_t option){ // 1 = X, 2 = time, 3 = Y, 4 = BACK
+  /* 
+  ________________________________
+  |          ADJUST              |
+  |------------------------------|
+  |   X              |  9  |     |
+  |------------------------------|
+  |   TIME           | 243 |     |
+  |------------------------------|
+  |   Y              | 243 |     |
+  |------------------------------|
+  |                BACK          |
+  |______________________________|
   */
   canvasPlot.clear();
   canvasPlot.drawRect(2, 2,  125, 10); // adjust
@@ -274,17 +284,17 @@ void displayAdjust(uint8_t option){
   if(option == 1){ 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[3]))); // prints x-pos
     canvasPlot.printFixed(6, 14, progBuffer, STYLE_BOLD);
-    dtostrf(eepromRead16(20), 100, 18, textBuffer);
+    dtostrf(x_position, 100, 18, textBuffer);
     canvasPlot.printFixed(60, 14, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[6]))); // prints time
     canvasPlot.printFixed(6, 23, progBuffer, STYLE_NORMAL);
-    dtostrf(eepromRead16(2*eepromRead16(20)), 100, 18, textBuffer);
+    dtostrf(eepromRead16(2*x_position), 100, 18, textBuffer);
     canvasPlot.printFixed(60, 23, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[4])));
     canvasPlot.printFixed(6, 32, progBuffer, STYLE_NORMAL);
-    dtostrf(eepromRead16(2*eepromRead16(20) + 22), 100, 29, textBuffer); 
+    dtostrf(eepromRead16(2*x_position + 22), 100, 29, textBuffer); 
     canvasPlot.printFixed(60, 32, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
@@ -293,17 +303,17 @@ void displayAdjust(uint8_t option){
   else if(option == 2){// make sure this list is sorted in increasing order
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[3]))); // prints xpos
     canvasPlot.printFixed(6, 14, progBuffer, STYLE_NORMAL);
-    dtostrf(eepromRead16(20), 100, 18, textBuffer);
+    dtostrf(x_position, 100, 18, textBuffer);
     canvasPlot.printFixed(60, 14, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[6]))); // prints time
     canvasPlot.printFixed(6, 23, progBuffer, STYLE_BOLD);
-    dtostrf(eepromRead16(2*eepromRead16(20)), 100, 18, textBuffer);
+    dtostrf(eepromRead16(2*x_position), 100, 18, textBuffer);
     canvasPlot.printFixed(60, 23, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[4]))); // prints ypos
     canvasPlot.printFixed(6, 32, progBuffer, STYLE_NORMAL);
-    dtostrf(eepromRead16(2*eepromRead16(20) + 22), 100, 29, textBuffer); 
+    dtostrf(eepromRead16(2*x_position + 22), 100, 29, textBuffer); 
     canvasPlot.printFixed(60, 32, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1]))); // prints back
@@ -312,17 +322,17 @@ void displayAdjust(uint8_t option){
   else if(option == 3){
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[3])));
     canvasPlot.printFixed(6, 14, progBuffer, STYLE_NORMAL);
-    dtostrf(eepromRead16(20), 100, 18, textBuffer);
+    dtostrf(x_position, 100, 18, textBuffer);
     canvasPlot.printFixed(60, 14, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[6])));
     canvasPlot.printFixed(6, 23, progBuffer, STYLE_NORMAL);
-    dtostrf(eepromRead16(2*eepromRead16(20)), 100, 18, textBuffer);
+    dtostrf(eepromRead16(2*x_position), 100, 18, textBuffer);
     canvasPlot.printFixed(60, 23, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[4])));
     canvasPlot.printFixed(6, 32, progBuffer, STYLE_BOLD);
-    dtostrf(eepromRead16(2*eepromRead16(20) + 22), 100, 29, textBuffer); 
+    dtostrf(eepromRead16(2*x_position + 22), 100, 29, textBuffer); 
     canvasPlot.printFixed(60, 32, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
@@ -331,17 +341,17 @@ void displayAdjust(uint8_t option){
   else if(option == 4){
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[3])));
     canvasPlot.printFixed(6, 14, progBuffer, STYLE_NORMAL);
-    dtostrf(eepromRead16(20), 100, 18, textBuffer);
+    dtostrf(x_position, 100, 18, textBuffer);
     canvasPlot.printFixed(60, 14, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[6])));
     canvasPlot.printFixed(6, 23, progBuffer, STYLE_NORMAL);
-    dtostrf(eepromRead16(2*eepromRead16(20)), 100, 18, textBuffer);
+    dtostrf(eepromRead16(2*x_position), 100, 18, textBuffer);
     canvasPlot.printFixed(60, 23, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[4])));
     canvasPlot.printFixed(6, 32, progBuffer, STYLE_NORMAL);
-    dtostrf(eepromRead16(2*eepromRead16(20) + 22), 100, 29, textBuffer); 
+    dtostrf(eepromRead16(2*x_position + 22), 100, 29, textBuffer); 
     canvasPlot.printFixed(60, 32, textBuffer, STYLE_NORMAL);
 
     strcpy_P(progBuffer, (char *)pgm_read_ptr(&(menuItems[1])));
@@ -349,21 +359,21 @@ void displayAdjust(uint8_t option){
   }
   canvasPlot.blt(0, 2);
 }
-void displayUpdate() { 
-  /* displayUpdate(): Print data on screen
-  ___________________
-  | MENU              |
+void displayUpdate() { // Print data on screen
+  /* 
+   ___________________
+  |        MENU       |
   |-------------------| 
-  | |                 |
-  | |     LINE        |
-  | |_______________  |
   | TIME  TARG  LEFT  | <-- canvasText
   | 0111  0000  0000  | <-- canvasText
-  -------------------
+  | |                 |
+  | |                 |
+  | |      LINE       |
+  | |_______________  |
+   -------------------
   */
   canvasText.clear();
   canvasText.printFixed(0, 0,  " Temp  Target   Time", STYLE_NORMAL);
-  // canvasText.printFixed(0, 11, "       Temp    State", STYLE_NORMAL);
   dtostrf(currentTemp, 6, 2, textBuffer);
   canvasText.printFixed(0, 8, textBuffer, STYLE_NORMAL);
   if (errorCode) {
@@ -380,18 +390,17 @@ void displayUpdate() {
   }
   canvasText.blt(0, 0);
 }
-
-void displayPlot(bool force) {
-  /* displayPlot()
+void displayPlot(bool force) { // Prints canvas plot
+  /* 
   ___________________
   | MENU  <           | <-- canvasPlot: MENU BUTTON
   |-------------------  <-- canvasPlot
+  | TIME  TARG  LEFT  |
+  | 0111  0000  0000  |
   | |                 | <-- canvasPlot
   | |                 | <-- canvasPlot
   | |     LINE        | <-- canvasPlot
   | ----------------  | <-- canvasPlot
-  | TIME  TARG  LEFT  |
-  | 0111  0000  0000  |
   -------------------
   */
   uint8_t currLinePosition = ovenTime * 127 / CureATotalTime;
@@ -403,23 +412,22 @@ void displayPlot(bool force) {
   canvasPlot.drawVLine(ovenTime * 127 / CureATotalTime, 0, 47); // line for total cookTime
   for (uint8_t i = 0; i < 128; i++) {
     uint8_t thisY = uint8_t(CureTemp(float(i) / 127 * CureATotalTime * 1000) / 4); // gets y-value 
-    //Serial.print(thisY); Serial.print(" ");
-    // uint8_t thisY = uint8_t( CureTemp(float(i) / 127 * cookTime[cookArrSize - 1] * 1000)  / 4);
+    // original: uint8_t thisY = uint8_t( CureTemp(float(i) / 127 * cookTime[cookArrSize - 1] * 1000)  / 4);
     canvasPlot.putPixel(i, 47 - thisY);
-  } // if (ovenStatus) { canvasPlot.printFixed(40, 32, "Oven Active!", STYLE_NORMAL); }
-  //Serial.println();
+  }
   canvasPlot.blt(0, 2);
 }
-
-float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) { // map float
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
-
-float CureTemp(uint32_t time) {
+uint16_t map16(uint16_t x, uint16_t in_min, uint16_t in_max, uint16_t out_min, uint16_t out_max) { // map uint16_t
+  return (uint16_t)(1.0* (x - in_min) * 1.0 * (out_max - out_min) / (in_max - in_min) + out_min);
+}
+float CureTemp(uint32_t time) { // possible error: calling mapFloat but passing in uint16_t variables
   float seconds = time / 1000.0;
   for (uint8_t i = 0; i < cookArrSize - 1; i++) {
-    if (eepromRead16(2*i + 2) > seconds) {
-      return mapFloat(seconds, eepromRead16(2*i), eepromRead16(2*i + 2), eepromRead16(i*2 + 22), eepromRead16(i*2 + 24));
+    if (eepromRead16(i*2 + 2) > seconds) {
+      return mapFloat(seconds, eepromRead16(i*2), eepromRead16(i*2 + 2), eepromRead16(i*2 + 22), eepromRead16(i*2 + 24));
     }
   } return 0;
 }
@@ -470,19 +478,17 @@ void setup() {
   ssd1306_128x64_i2c_init();
   ssd1306_clearScreen();
   ssd1306_setFixedFont(ssd1306xled_font6x8);
-  currCanvas = 0; // defaults to graph
   canvasText.clear();
   canvasPlot.clear();
   displayPlot(true);
-  CureATotalTime = 22956 * 1000; // ms for Cure A
+  currCanvas = 0; // defaults to graph
+  CureATotalTime = 22956000; // ms for Cure A
   delay(300);
 }
 void loop() {
   // Update timing variables
-  Serial.print("knobY: "); Serial.println(knobY);
   now = millis() * timeDilation;
 
-  // Update EEPROM initially
   if (eepromRead16(100) == 255){ // will execute when entering 1st loop()
     initializeEEPROMData();
     eepromUpdate16(100, 0);
@@ -500,7 +506,6 @@ void loop() {
     startTime = now - (60000.0 * currentTemp / 1.0); // offset
     targetTemp = 0;
   }
-
   relayStatus = (now % uint16_t(500 * timeDilation)) < (ovenPower * 500 * timeDilation);
   digitalWrite(SSR1_EN, relayStatus);
   digitalWrite(SSR2_EN, relayStatus);
@@ -508,18 +513,12 @@ void loop() {
     frameTime = now - lastSwitchTime; // change in time
     lastSwitchTime = now;
     switchCounter++;
-    if (switchCounter > 200) { // prevent screen burnout
-      ssd1306_positiveMode();
-      // displayPlot(true);
-    }
-    else {
-      ssd1306_negativeMode();
-      // displayPlot(true);
-    }
+    // prevent screen burnout 
+    if (switchCounter > 200) { ssd1306_positiveMode(); /* displayPlot(true); */ }
+    else { ssd1306_negativeMode(); /* displayPlot(true); */ }
 
     // temperature updates
     currentTempBuf[avgBufIdx] = readTemperature(CS_TEMP1);
-    //currentTempBuf[avgBufIdx] = (readTemperature(CS_TEMP1) + readTemperature(CS_TEMP2) + readTemperature(CS_TEMP3)) * 0.333333333333333333333333;
     float newTemperature = readTemperature(CS_TEMP1);
     errorCode = (errorCode & 0b11111101) + ((newTemperature == -1) << 1);
     currentTempBuf[avgBufIdx] = mapFloat(newTemperature, temp1_Zero, temp1_Hundred, 0, 100);
@@ -543,7 +542,7 @@ void loop() {
     // displayUpdate(); displayPlot(false); // update plot on display
   }
 
-  // canvas state updates
+  // CANVAS state updates
   if(currCanvas == 0){ // graph
     displayUpdate();
     displayPlot(true); // update plot
@@ -553,37 +552,50 @@ void loop() {
       }
   }
   else if(currCanvas == 1){ // menu
-      knobY = analogRead(KNOB2) / 343; // [0-2]
+      knobY = map16(analogRead(KNOB2), 0, 1023, 0, 2); // range: [0-2]
       displayMenu(knobY+1); // defaults to 0 = back button
       if(!digitalRead(BUTTON2) && knobY == 0){ /* back button*/ currCanvas = 0; while (!digitalRead(BUTTON2));  }
-      else if(!digitalRead(BUTTON2) && knobY == 1){ /* adjust button*/ currCanvas = 2; while (!digitalRead(BUTTON2));}
+      else if(!digitalRead(BUTTON2) && knobY == 1){ /* adjust button*/ currCanvas = 2; while (!digitalRead(BUTTON2)); }
       else{ /* filler */ }
   }
   else if (currCanvas == 2){ // adjust
-    adjustStatus = true;
-    knobY = analogRead(KNOB2) / 256; // [0-1023] ~ [0, 1, 2, 3]
-
-    if(knobY == 0){ // adjust_x
+    knobY = map16(analogRead(KNOB2), 0, 1023, 0, 3); // [0, 1, 2, 3]
+    Serial.print("knobY: "); Serial.println(knobY);
+    if(knobY == 0){ // adjust x-position 
+      Serial.println("update x-pos");
       displayAdjust(1);
-      uint8_t kX = analogRead(KNOB1) / 103; // [0-1023] ~ [0-9]
-      eepromUpdate16(20, kX); // x position
-      if(eepromRead16(kX*2) == -1){ 
-        eepromUpdate16(kX*2, getMinCookTime());
-        eepromUpdate16(kX*2+22, 0);
+      uint16_t kX = map16(analogRead(KNOB1), 0, 1023, 0, getMaxXPosition()+1); // range: [0-maxIndex+1]
+      Serial.print("kX"); Serial.println(kX);
+      if(!digitalRead(BUTTON2)){ // confirms time that for position knob
+        adjustStatus = true;
+        x_position = kX;
+        while(!digitalRead(BUTTON2));
+        if(eepromRead16(kX*2) == 0xffff){  // updating x position
+          eepromUpdate16(kX*2, getMinCookTime());
+          eepromUpdate16(kX*2+22, 0);
+        }
       }
     }
     else if(knobY == 1){ // cookTime
       displayAdjust(2);
-      float divisor = 1023.0 / (10000.0 - getMinCookTime());
-      uint8_t kX = getMinCookTime() + analogRead(KNOB1) / divisor; // [0-1023] ~ [min-10k]
-      eepromUpdate16(eepromRead16(20)*2, kX);
-
+      // Serial.println("update cookTime");
+      uint16_t cookTime = map16(analogRead(KNOB1), 0, 1023, getMinCookTime(), 10000); // range: [minCookTime()-10000]
+      Serial.print("cookTime: "); Serial.println(cookTime);
+      if(!digitalRead(BUTTON2)){ // confirms time that for position knob
+        adjustStatus = true;
+        eepromUpdate16(x_position*2, cookTime);
+        while(!digitalRead(BUTTON2));
+      }
     }
     else if(knobY == 2){ // yPos
       displayAdjust(3);
-      uint8_t kX = float(analogRead(KNOB1)) / 5.2; // maps [0-1023] ~ [0-200]
-      Serial.println("knobX"); Serial.println(kX);
-      eepromUpdate16(eepromRead16(eepromRead16(20)*2 +22), kX);
+      uint16_t temp = map16(analogRead(KNOB1), 0, 1023, 0, 200); // range: [0-200]
+      Serial.print("temp: "); Serial.println(temp);
+      if(!digitalRead(BUTTON2)){ // confirms time that for position knob
+        adjustStatus = true;
+        eepromUpdate16(eepromRead16(x_position*2 +22), temp);
+        while(!digitalRead(BUTTON2));
+      }
     }
     else if (knobY == 3){ // back button
       displayAdjust(4);
@@ -593,8 +605,8 @@ void loop() {
       }
     }
     else { /* ERROR */ }
-    // recalibration updates
-    if(adjustStatus == true){
+    
+    if(adjustStatus == true){ // recalibration for updates if there were any
       recalibrateSettings();
       adjustStatus = false;
     }
