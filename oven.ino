@@ -89,7 +89,7 @@ int freeRam(void) {
 }
 
 uint16_t eepromRead16(uint8_t addr) {
-  return EEPROM.read(addr) << 8 + EEPROM.read(addr + 1);
+  return (uint16_t(EEPROM.read(addr)) << 8) + EEPROM.read(addr + 1);
 }
 void eepromUpdate16(uint8_t addr, uint16_t value) {
   EEPROM.update(addr, value >> 8);
