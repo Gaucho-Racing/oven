@@ -268,11 +268,7 @@ void displayAdjust(uint8_t option){ // 1 = X, 2 = time, 3 = Y, 4 = BACK
   |------------------------------|
   |   Y              | 243 |     |
   |------------------------------|
-<<<<<<< Updated upstream
-  |              BACK            |
-=======
   |   BACK                       |
->>>>>>> Stashed changes
   |______________________________|
   */
   canvasPlot.clear();
@@ -371,11 +367,7 @@ void displayUpdate() { // Print data on screen
 |-------------------|
   */
   canvasText.clear();
-<<<<<<< Updated upstream
-  canvasText.printFixed(0, 1,  " Temp  Target   Time", STYLE_NORMAL);
-=======
   canvasText.printFixed(0, 1,  " Temp   Target  Time", STYLE_NORMAL);
->>>>>>> Stashed changes
   dtostrf(currentTemp, 6, 2, textBuffer);
   canvasText.printFixed(0, 9, textBuffer, STYLE_NORMAL);
   if (errorCode) {
@@ -427,12 +419,7 @@ uint16_t map16(uint16_t x, uint16_t in_min, uint16_t in_max, uint16_t out_min, u
 }
 float CureTemp(uint32_t time) { // possible error: calling mapFloat but passing in uint16_t variables
   float seconds = time / 1000.0;
-  //Serial.println(F"=======");
   for (uint8_t i = 0; i < cookArrSize - 1; i++) {
-<<<<<<< Updated upstream
-    //Serial.println(eepromRead16(i*2 + 2));
-=======
->>>>>>> Stashed changes
     if (eepromRead16(i*2 + 2) > seconds) {
       return mapFloat(seconds, eepromRead16(i*2), eepromRead16(i*2 + 2), eepromRead16(i*2 + 22), eepromRead16(i*2 + 24));
     }
@@ -494,10 +481,6 @@ void setup() {
   if (eepromRead16(100) != 0){ // will execute when entering 1st loop()
     initializeEEPROMData();
     eepromUpdate16(100, 0);
-<<<<<<< Updated upstream
-    Serial.println("First init");
-=======
->>>>>>> Stashed changes
   }
 
   delay(300);
@@ -505,20 +488,16 @@ void setup() {
 void loop() {
   // Update timing variables
   now = millis() * timeDilation;
-<<<<<<< Updated upstream
-
-=======
   if(errorCode){
-    Serial.println(f"ERROR!!");
+    Serial.println("ERROR!");
     tone(BUZZER, 400); // lol
     delay(5000);
     noTone(BUZZER);
   }
->>>>>>> Stashed changes
   // check if oven should be working
   if (!digitalRead(BUTTON1)) { // flip ovenStatus when button is pressed
     tone(BUZZER, 524);
-    delay(); 
+    delay(50); 
     noTone(BUZZER);
     ovenStatus = !ovenStatus && !errorCode;
     displayPlot(true);
@@ -579,15 +558,9 @@ void loop() {
       }
   }
   else if(currCanvas == 1){ // menu
-<<<<<<< Updated upstream
-      knobY = map16(analogRead(KNOB2), 0, 1023, 0, 2); // range: [0-3]
-      displayMenu(knobY+1); // defaults to 0 = back button
-      if(!digitalRead(BUTTON2) && knobY == 0){ /* back button*/ 
-=======
       knobY = map16(analogRead(KNOB2), 0, 1023, 0, 2); // range: [0-2]
       displayMenu(knobY+1); // defaults to 0 = back button
       if(!digitalRead(BUTTON2) && knobY == 0){ // back button*
->>>>>>> Stashed changes
         currCanvas = 0; 
         recalibrateArrayfromEEPROM();
         while (!digitalRead(BUTTON2)); 
