@@ -58,6 +58,7 @@ Location 100: 255 if not written to, else, 1
 float targetTemp; // target temperature
 float currentTemp; // current temperature
 bool relayStatus = false; // oven itself is on/off
+bool doneCooking = false; // cookTime finished, timeLeft = 0
 bool ovenStatus = false; // modes: on/off vs adjust
 bool adjustStatus = false; // user changed settings
 bool addedPoint = false; // maybe will use? user can only add 1 point at a time, 
@@ -99,7 +100,7 @@ uint32_t now;
 uint32_t lastSwitchTime;
 uint32_t startTime = 0; // oven starts
 uint32_t ovenTime = 0; // now - startTime
-uint32_t timeLeft = 0; // time Left until Cure finishes
+uint32_t timeLeft = 4294967295; // time Left until Cure finishes
 uint32_t CureATotalTime = 0; // default cure time
 
 // Canvas Stuff
@@ -268,11 +269,7 @@ void displayAdjust(uint8_t option){ // 1 = X, 2 = time, 3 = Y, 4 = BACK
   |------------------------------|
   |   Y              | 243 |     |
   |------------------------------|
-<<<<<<< Updated upstream
   |              BACK            |
-=======
-  |   BACK                       |
->>>>>>> Stashed changes
   |______________________________|
   */
   canvasPlot.clear();
@@ -371,11 +368,7 @@ void displayUpdate() { // Print data on screen
 |-------------------|
   */
   canvasText.clear();
-<<<<<<< Updated upstream
   canvasText.printFixed(0, 1,  " Temp  Target   Time", STYLE_NORMAL);
-=======
-  canvasText.printFixed(0, 1,  " Temp   Target  Time", STYLE_NORMAL);
->>>>>>> Stashed changes
   dtostrf(currentTemp, 6, 2, textBuffer);
   canvasText.printFixed(0, 9, textBuffer, STYLE_NORMAL);
   if (errorCode) {
@@ -429,10 +422,7 @@ float CureTemp(uint32_t time) { // possible error: calling mapFloat but passing 
   float seconds = time / 1000.0;
   //Serial.println(F"=======");
   for (uint8_t i = 0; i < cookArrSize - 1; i++) {
-<<<<<<< Updated upstream
     //Serial.println(eepromRead16(i*2 + 2));
-=======
->>>>>>> Stashed changes
     if (eepromRead16(i*2 + 2) > seconds) {
       return mapFloat(seconds, eepromRead16(i*2), eepromRead16(i*2 + 2), eepromRead16(i*2 + 22), eepromRead16(i*2 + 24));
     }
@@ -494,10 +484,7 @@ void setup() {
   if (eepromRead16(100) != 0){ // will execute when entering 1st loop()
     initializeEEPROMData();
     eepromUpdate16(100, 0);
-<<<<<<< Updated upstream
-    Serial.println("First init");
-=======
->>>>>>> Stashed changes
+    // Serial.println("First init");
   }
 
   delay(300);
@@ -505,23 +492,25 @@ void setup() {
 void loop() {
   // Update timing variables
   now = millis() * timeDilation;
-<<<<<<< Updated upstream
-
-=======
   if(errorCode){
     Serial.println(f"ERROR!!");
-    tone(BUZZER, 400); // lol
-    delay(5000);
+    tone(BUZZER, 524); // lol
+    delay(500);
     noTone(BUZZER);
+    delay(500);
   }
->>>>>>> Stashed changes
   // check if oven should be working
-  if (!digitalRead(BUTTON1)) { // flip ovenStatus when button is pressed
-    tone(BUZZER, 524);
-    delay(); 
+  if (!digitalRead(BUTTON1) && doneCooking == false) { // flip ovenStatus when button is pressed
+    tone(BUZZER, 262);
+    delay();
     noTone(BUZZER);
     ovenStatus = !ovenStatus && !errorCode;
     displayPlot(true);
+    while (!digitalRead(BUTTON1));
+  }
+  else if(!digitalRead(BUTTON1) && doneCooking == true){
+    doneCooking = false;
+    noTone(BUZZER);
     while (!digitalRead(BUTTON1));
   }
   if (!ovenStatus) { // turn off, update starting temperature & time
@@ -567,7 +556,12 @@ void loop() {
     if (CureATotalTime > ovenTime) {
       timeLeft = CureATotalTime - ovenTime;
     }
-    else { timeLeft = 0; }
+    else { 
+      timeLeft = 0; 
+      Serial.println(f"Finished cook!");
+      tone(BUZZER, 200);
+      doneCooking = true;
+    }
     // displayUpdate(); displayPlot(false); // update plot on display
   }
   // CANVAS state updates
@@ -579,15 +573,9 @@ void loop() {
       }
   }
   else if(currCanvas == 1){ // menu
-<<<<<<< Updated upstream
-      knobY = map16(analogRead(KNOB2), 0, 1023, 0, 2); // range: [0-3]
-      displayMenu(knobY+1); // defaults to 0 = back button
-      if(!digitalRead(BUTTON2) && knobY == 0){ /* back button*/ 
-=======
       knobY = map16(analogRead(KNOB2), 0, 1023, 0, 2); // range: [0-2]
       displayMenu(knobY+1); // defaults to 0 = back button
       if(!digitalRead(BUTTON2) && knobY == 0){ // back button*
->>>>>>> Stashed changes
         currCanvas = 0; 
         recalibrateArrayfromEEPROM();
         while (!digitalRead(BUTTON2)); 
