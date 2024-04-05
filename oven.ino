@@ -420,9 +420,7 @@ uint16_t map16(uint16_t x, uint16_t in_min, uint16_t in_max, uint16_t out_min, u
 }
 float CureTemp(uint32_t time) { // possible error: calling mapFloat but passing in uint16_t variables
   float seconds = time / 1000.0;
-  //Serial.println(F"=======");
   for (uint8_t i = 0; i < cookArrSize - 1; i++) {
-    //Serial.println(eepromRead16(i*2 + 2));
     if (eepromRead16(i*2 + 2) > seconds) {
       return mapFloat(seconds, eepromRead16(i*2), eepromRead16(i*2 + 2), eepromRead16(i*2 + 22), eepromRead16(i*2 + 24));
     }
@@ -484,7 +482,6 @@ void setup() {
   if (eepromRead16(100) != 0){ // will execute when entering 1st loop()
     initializeEEPROMData();
     eepromUpdate16(100, 0);
-    // Serial.println("First init");
   }
 
   delay(300);
